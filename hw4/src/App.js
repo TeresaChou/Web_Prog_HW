@@ -1,32 +1,77 @@
 import React, { Component } from 'react';
 // import logo from './img/logo.svg';
 import './App.css';
+import Conversation from "./Conversation";
+import { DropdownButton } from "react-bootstrap";
+import { MenuItem } from "react-bootstrap";
+import { Image } from "react-bootstrap";
+import socketIOClient from "socket.io-client";
 
 class Contact extends Component {
-
    constructor(props) {
       super(props);
-      this.state = {
-         select: this.props.select
-      };
+      this.select = this.select.bind(this);
+   }
+   select() {
+      this.props.switch(this.props.name);
    }
    render() {
       return (
-         <div className="contact" id={this.state.select}>
-            <img src={ require("./img/" + this.props.name + ".jpg")} alt="" className="photo" />
+         <div className="contact" id={this.props.select} 
+            onClick={this.select} >
+            <Image src={ require("./img/" + this.props.name + ".jpg")} alt=""
+               circle className="photo" />
             <h4>{this.props.name}</h4>
+            {  this.props.unread?
+                  <Image src={ require("./img/bell.png")} alt=""
+                     id="bell" />: ""}
          </div>
       );
    }
 }
 
 class ContactSec extends Component {
-
+   constructor(props) {
+      super(props);
+      this.state = {};
+      for(let name of this.props.list) 
+         this.state[name] = false;
+      this.switch = this.switch.bind(this);
+      this.read = this.read.bind(this);
+      this.unread = this.unread.bind(this);
+   }
+   componentDidMount() {
+      this.props.setUnread(this.unread);
+   }
+   switch(name) {
+      this.read(name);
+      this.props.switch(name);
+   }
+   read(name) {
+      let s = this.state;
+      s[name] = false;
+      this.setState(s);
+   }
+   unread(name) {
+      let s = this.state;
+      s[name] = true;
+      this.setState(s);
+      console.log("an unread messge from", name);
+   }
    render() {
       return (
          <div className="contactSec">
             {this.props.list.map(
-               name => <Contact name={name} select={name === this.props.name? "select": "" }/> )}
+               name => <Contact name={name} switch={this.switch} unread={this.state[name]}
+                  select={name === this.props.to? "select": "" }/> )}
+               <DropdownButton title={"user: " + this.props.from} 
+                  bsStyle="primary" id={`dropdown-basic-2`} >
+               { this.props.allList.map( 
+                  name => <MenuItem eventKey={ this.props.allList.indexOf(name)}
+                     active={ name === this.props.from } 
+                     onSelect={ () => this.props.switchUser(name) }>
+                     { name }</MenuItem> )}
+            </DropdownButton>
          </div>
       );
    }
@@ -64,127 +109,67 @@ class Input extends Component {
    }
 }
 
-class Message extends Component {
-
-   render() {
-      return (
-         <div className="message" id={this.props.id}>
-            <p>{ this.props.text }</p>
-         </div>
-      );
-   }
-}
-
-class Conversation extends Component {
-
-   constructor(props) {
-      super(props);
-      this.state = {
-         list: []
-      };
-      this.end = React.createRef();
-      this.addMess = this.addMess.bind(this);
-   }
-   componentWillMount() {
-      this.getData();
-   }
-   componentDidMount() {
-      this.props.setAdd(this.addMess);
-      this.scroll();
-   }
-   componentDidUpdate() {
-      this.scroll();
-   }
-   addMess(content, sender) {
-      var load = {
-            "name": sender,
-            "text": content
-      };
-      var data = new FormData();
-      data.append("name", sender);
-      data.append("text", content);
-   
-      fetch("http://localhost:3001/" + this.props.from + "/" + this.props.to, {
-         method: "post",
-         mode: "no-cors",
-         headers: {
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded"
-         },
-         body: "name=" + sender + "&text=" + content
-      })
-      // .then(res => res.json())
-         .then(cont => console.log(cont))
-         .catch(error => console.log("Error fo POST: " + error));
-
-      this.getData();
-
-      //  this.setState( prevState => { return {
-      //     list: [...prevState.list, {
-      //        text: content,
-      //        id: sender
-      //     }]
-      //  }} );
-   }
-   scroll() {
-      this.end.scrollIntoView(false);
-   }
-   getData() {
-      fetch("/" + this.props.from + "/" + this.props.to)
-         .then(res => res.json())
-         .then(conv =>  { 
-            this.setState({ list: conv.content });
-            console.log(conv);
-         })
-         .catch(error => console.log("Error for GET: " + error));
-   }
-
-   render() {
-      return (
-         <div className="conversation">
-            { this.state.list.map( mess => <Message text={mess.text}
-            id={mess.name === this.props.from? "from": "to"} /> ) }
-            <div style={{float:"left", clear:"both", height:"0px"}}
-               ref={ end => { this.end = end; } } />
-         </div>
-      );
-   }
-}
 
 class App extends Component {
 
    constructor(props) {
       super(props);
       this.state = {
+         socket: socketIOClient("http://localhost:3001"),
          from: "Snoopy",
          to: "Lucy",
          addMessToConv: function() {},
+         updateConv: function() {},
+         unread: function() {},
          contacts: ["Charlie Brown", "Snoopy", "Petty", "Schroeder", "Lucy"]
       };
-      this.addFromMess = this.addFromMess.bind(this);
+      this.sendMess = this.sendMess.bind(this);
       this.switchContact = this.switchContact.bind(this);
+      this.switchUser = this.switchUser.bind(this);
    }
-   addFromMess(text) {
-      this.state.addMessToConv(text, this.state.from);
-   }
-   switchContact(name) {
-      this.setState({
-         to: name
+   componentDidMount() {
+      this.state.socket.on("addMessage", (from, to, text) => {
+         if( (from === this.state.from && to === this.state.to) ||
+            (from === this.state.to && to === this.state.from) ) {
+            this.state.addMessToConv(text, from);
+            console.log("a message added to the conversation");
+         }
+         else if (to === this.state.from) {
+            this.state.unread(from);
+         }
       });
    }
-  render() {
-    return (
-      <div className="App">
-         <ContactSec name={this.state.to}
-            list={this.state.contacts.filter(name => this.state.from !== name)} />
-         <h3 className="titleName">{ this.state.to }</h3>
-         <Conversation from={this.state.from} to={this.state.to}
-            setAdd={ add => {this.setState({
-               addMessToConv: add });
-         }}/>
-         <Input addInput={ this.addFromMess }/>
-      </div>
-    );
+   sendMess(text) {
+      this.state.socket.emit("addMessage", this.state.from, this.state.to, text);
+      console.log("a message sent to the server");
+   }
+   async switchContact(name) {
+      if(name !== this.state.to) {
+         await this.setState({ to: name });
+         this.state.updateConv();
+      }
+   }
+   async switchUser(name) {
+      if(name !== this.state.from) {
+         await this.setState({ from: name });
+         this.state.updateConv();
+      }
+   }
+
+   render() {
+      return (
+         <div className="App">
+            <ContactSec from={this.state.from} to={this.state.to} switch={this.switchContact}
+               list={this.state.contacts.filter(name => this.state.from !== name)} 
+               setUnread={ set => this.setState({ unread: set })}
+               allList={this.state.contacts} switchUser={this.switchUser} />
+            <h3 className="titleName">{ this.state.to }</h3>
+            <Conversation from={this.state.from} to={this.state.to}
+               setAdd={ add => this.setState({addMessToConv: add })}
+               getData={ get => this.setState( {updateConv: get} )} />
+            <Input addInput={ this.sendMess }/>
+         </div>
+      );
   }
 }
 
